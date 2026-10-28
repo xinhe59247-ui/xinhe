@@ -1,0 +1,44 @@
+name: Market digest
+
+on:
+  schedule:
+    # Moscow UTC+3: 09:00, 12:00, 21:00. GitHub may delay scheduled runs.
+    - cron: '0 6,9,18 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只查询行情，不发送 Telegram'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-digest
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate parsers and failure handling
+        run: python -m unittest discover -s tests -v
+      - name: Fetch and send digest
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python bot.py --dry-run
+          else
+            python bot.py
+          fi
