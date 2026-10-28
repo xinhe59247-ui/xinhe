@@ -194,15 +194,22 @@ def cny_rub(now):
 
 
 def build_message(now):
-    sections = ["📊 原油与人民币/卢布行情", f"查询时间：{now:%Y-%m-%d %H:%M:%S} MSK", ""]
+    sections = ["📊 原油与人民币/卢布行情", f"{now:%Y-%m-%d %H:%M} MSK", ""]
     failed = False
     for getter in (brent, cny_rub):
         try:
             quote = getter(now)
             price = (f"{quote.value:.2f} USD/桶" if getter is brent
                      else f"1 CNY = {quote.value:.4f} RUB")
-            sections += [quote.label, price, "数据时间：" + quote.updated,
-                         "来源：" + quote.source, quote.note, ""]
+            label = "布伦特期货（延时报价）" if getter is brent else "人民币兑卢布"
+            if getter is brent and "现货" in quote.label:
+                label = "布伦特现货（日度备用）"
+            updated = quote.updated.split("（")[0].strip()
+            time_label = "更新：" if getter is brent else "生效："
+            sections += [label, price, time_label + updated]
+            if "⚠️" in quote.note:
+                sections.append("⚠️ 已切换日度现货参考价" if "现货" in quote.label else "⚠️ 行情较旧")
+            sections.append("")
         except (FeedError, ValueError, KeyError, TypeError, IndexError, ET.ParseError, OSError):
             failed = True
             label = "布伦特原油" if getter is brent else "人民币兑卢布"
