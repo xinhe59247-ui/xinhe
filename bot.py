@@ -193,26 +193,50 @@ def cny_rub(now):
     return parse_cbr(fetch("https://www.cbr.ru/scripts/XML_daily.asp?" + query), now)
 
 
+def parse_gold(raw, now):
+    data = json.loads(raw)
+    if data["symbol"] != "XAU" or data.get("currency") != "CNY":
+        raise ValueError("wrong gold instrument/currency")
+    stamp = datetime.fromisoformat(data["updatedAt"].replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        raise ValueError("gold timestamp has no timezone")
+    stamp = stamp.astimezone(MSK)
+    if stamp > now + timedelta(minutes=10) or now - stamp > timedelta(days=4):
+        raise ValueError("invalid/stale gold timestamp")
+    note = "⚠️ 行情较旧" if now - stamp > timedelta(minutes=15) else ""
+    # Gold API quotes per troy ounce; convert to CNY per gram.
+    return Quote(positive(data["price"]) / 31.1034768, "国际现货黄金", "Gold API",
+                 stamp.strftime("%Y-%m-%d %H:%M:%S MSK"), note)
+
+
+def gold(now):
+    return parse_gold(fetch("https://api.gold-api.com/price/XAU/CNY"), now)
+
+
 def build_message(now):
-    sections = ["📊 原油与人民币/卢布行情", f"{now:%Y-%m-%d %H:%M} MSK", ""]
+    sections = ["📊 每日行情", f"{now:%Y-%m-%d %H:%M} MSK", ""]
     failed = False
-    for getter in (brent, cny_rub):
+    for getter in (brent, cny_rub, gold):
         try:
             quote = getter(now)
-            price = (f"{quote.value:.2f} USD/桶" if getter is brent
-                     else f"1 CNY = {quote.value:.4f} RUB")
-            label = "布伦特期货（延时报价）" if getter is brent else "人民币兑卢布"
+            if getter is brent:
+                price, label = f"{quote.value:.2f} USD/桶", "布伦特期货（延时报价）"
+            elif getter is cny_rub:
+                price, label = f"1 CNY = {quote.value:.4f} RUB", "人民币兑卢布"
+            else:
+                price, label = f"{quote.value:.2f} 元/克", "国际现货黄金"
             if getter is brent and "现货" in quote.label:
                 label = "布伦特现货（日度备用）"
             updated = quote.updated.split("（")[0].strip()
-            time_label = "更新：" if getter is brent else "生效："
+            time_label = "生效：" if getter is cny_rub else "更新："
             sections += [label, price, time_label + updated]
             if "⚠️" in quote.note:
                 sections.append("⚠️ 已切换日度现货参考价" if "现货" in quote.label else "⚠️ 行情较旧")
             sections.append("")
-        except (FeedError, ValueError, KeyError, TypeError, IndexError, ET.ParseError, OSError):
+        except (FeedError, ValueError, KeyError, TypeError, IndexError, OverflowError, ET.ParseError, OSError):
             failed = True
-            label = "布伦特原油" if getter is brent else "人民币兑卢布"
+            label = ("布伦特原油" if getter is brent else
+                     "人民币兑卢布" if getter is cny_rub else "国际现货黄金")
             sections += [f"⚠️ {label}：本次获取失败，未使用缓存价格。", ""]
             LOG.error("%s feed failed", label)
     return "\n".join(sections).strip(), failed
