@@ -45,7 +45,7 @@ class MarketTests(unittest.TestCase):
 
     def test_feed_failure_still_reports_other_quote(self):
         q = bot.Quote(11.5, "人民币兑卢布", "CBR", "2026-10-29", "日度")
-        with patch.object(bot, "brent", side_effect=bot.FeedError), patch.object(bot, "cny_rub", return_value=q):
+        with patch.object(bot, "brent", side_effect=bot.FeedError), patch.object(bot, "cny_rub", return_value=q), patch.object(bot, "gold", side_effect=bot.FeedError):
             text, failed = bot.build_message(NOW)
         self.assertTrue(failed)
         self.assertIn("本次获取失败", text)
@@ -70,6 +70,30 @@ class MarketTests(unittest.TestCase):
         self.assertEqual(call.call_count, 1)
         self.assertNotIn("private", str(caught.exception))
         self.assertNotIn("secret-url", str(caught.exception))
+
+    def test_gold_spot_currency_time_and_invalid_data(self):
+        data = dict(symbol="XAU", currency="CNY", price=28000, updatedAt="2026-10-29T08:59:30Z")
+        quote = bot.parse_gold(json.dumps(data), NOW)
+        self.assertAlmostEqual(quote.value, 28000 / 31.1034768)
+        self.assertEqual(quote.updated, "2026-10-29 11:59:30 MSK")
+        for change in ({"price": "nan"}, {"currency": "USD"}, {"symbol": "GC=F"},
+                       {"updatedAt": "2026-10-30T00:00:00Z"},
+                       {"updatedAt": "2026-10-20T00:00:00Z"},
+                       {"updatedAt": "2026-10-29T08:00:00"}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                bot.parse_gold(json.dumps(data | change), NOW)
+
+    def test_gold_failure_keeps_other_markets_and_hides_sources(self):
+        oil = bot.Quote(80.5, "布伦特期货", "Yahoo Finance", "2026-10-29 11:59:00 MSK", "")
+        fx = bot.Quote(12.08, "人民币兑卢布", "CBR", "2026-10-29", "")
+        with patch.object(bot, "brent", return_value=oil), patch.object(bot, "cny_rub", return_value=fx), patch.object(bot, "gold", side_effect=bot.FeedError):
+            message, failed = bot.build_message(NOW)
+        self.assertTrue(failed)
+        self.assertIn("80.50 USD/桶", message)
+        self.assertIn("1 CNY = 12.0800 RUB", message)
+        self.assertIn("国际现货黄金：本次获取失败", message)
+        self.assertNotIn("Yahoo", message)
+        self.assertNotIn("来源", message)
 
 
 if __name__ == "__main__":
