@@ -220,16 +220,14 @@ def build_message(now):
         try:
             quote = getter(now)
             if getter is brent:
-                price, label = f"{quote.value:.2f} USD/桶", "布伦特期货（延时报价）"
+                price, label = f"{quote.value:.2f} USD/桶", "布伦特期货"
             elif getter is cny_rub:
                 price, label = f"1 CNY = {quote.value:.4f} RUB", "人民币兑卢布"
             else:
                 price, label = f"{quote.value:.2f} 元/克", "国际现货黄金"
             if getter is brent and "现货" in quote.label:
                 label = "布伦特现货（日度备用）"
-            updated = quote.updated.split("（")[0].strip()
-            time_label = "生效：" if getter is cny_rub else "更新："
-            sections += [label, price, time_label + updated]
+            sections += [label, price]
             if "⚠️" in quote.note:
                 sections.append("⚠️ 已切换日度现货参考价" if "现货" in quote.label else "⚠️ 行情较旧")
             sections.append("")
